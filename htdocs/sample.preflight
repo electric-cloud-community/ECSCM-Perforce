@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data>
+ <server>
+ <userName>myuser</userName>
+ <hostName>localhost</hostName>
+ </server>
+ <procedure>
+ <projectName>MyProject</projectName>
+ <procedureName>Master</procedureName>
+ <parameter>
+ <name>preFlight</name>
+ <value>1</value>
+ </parameter>
+ <parameter>
+ <name>preFlightUser</name>
+ <value>myuser</value>
+ </parameter>
+ <jobTimeout>7200</jobTimeout>
+ </procedure>
+ <scm>
+ <type>perforce</type>
+ <port>p4:3710</port>
+ <user>myuser</user>
+ <client>myuser</client>
+ <template>build-main</template>
+ </scm>
+</data>

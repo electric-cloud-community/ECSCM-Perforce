@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data>
+	<server>
+    	<userName>admin</userName>
+    	<hostName>localhost</hostName>
+    </server>
+    <procedure>
+		<projectName>Commander</projectName>
+		<procedureName>Master</procedureName>
+	</procedure>
+	<scm>
+	    <type>Perforce</type>
+        <client>client</client>
+	</scm>
+</data>

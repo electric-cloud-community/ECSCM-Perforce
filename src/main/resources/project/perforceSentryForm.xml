@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<editor>
+    <label>Continuous Integration - Perforce</label>
+     <version>@PLUGIN_VERSION@</version>
+    <description>A schedule that is enabled for ElectricSentry continuous integration with Perforce.</description>
+    <help>https://docs.cloudbees.com/docs/cloudbees-cd/latest/plugins/ecscm-perforce#getSCMTag</help>
+    <formElement>
+        <type>textarea</type>
+        <label>Client or depot:</label>
+        <property>P4ClientOrDepot</property>
+        <required>1</required>
+        <documentation>This field specifies a part of the Perforce depot to monitor. It can take three forms: An existing client, like "perforce-client-one" or a single, specific path in the depot, like "//depot/internal/sentry". Multiple depot paths and their mapping to the workspace. Each line looks like: "//depot/internal/testproj;test-directory"</documentation>
+    </formElement>
+    <formElement>
+        <type>textarea</type>
+        <label>Exclude Paths:</label>
+        <property>P4ExcludePaths</property>
+        <documentation>If P4ClientOrDepot is specified as view lines, this parameter lets you set exclusions. Each line looks like: "//depot/tools/old;tools/old"</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Paths:</label>
+        <property>P4Paths</property>
+        <documentation>If P4ClientOrDepot is blank, a temporary client is created and P4Paths is interpreted to be a specification for the "view" lines.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Quiet time minutes:</label>
+        <property>QuietTimeMinutes</property>
+        <documentation>The number of minutes of no check-in activity required before launching the procedure.</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Enabled for ElectricSentry:</label>
+        <property>TriggerFlag</property>
+        <checkedValue>2</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>1</initiallyChecked>
+        <documentation>Enable for continuous integration monitoring by ElectricSentry.</documentation>
+    </formElement>
+    <formElement>
+        <type>textarea</type>
+        <label>PreExecution Commands:</label>
+        <property>PreExecutionCmd</property>
+        <documentation>Series of commands performed before checking client (i.e. dynamically generating a clientspec). (optional)</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Automatic Ticket Login/Logout:</label>
+        <property>autoLogin</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked it uses the P4TICKETS authentication form rather than user/password.</documentation>
+    </formElement>
+    <formElement>
+        <!-- http://jira.electric-cloud.com/browse/ECPSCMGIT-200 -->
+        <type>checkbox</type>
+        <label>Run Schedule Even if Another Instance is Running:</label>
+        <property>runDuplicates</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked, the schedule will be launched even if the another instance of this schedule is already running.</documentation>
+    </formElement>
+    <formElement>
+        <property>scheduleDisabled</property>
+        <value>1</value>
+    </formElement>
+    <formElement>
+        <property>priority</property>
+        <configurable>1</configurable>
+    </formElement>
+</editor>

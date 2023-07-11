@@ -1,0 +1,1804 @@
+# -*-Perl-*-
+# perforce.ntest -
+#
+# Exercise basic operations of the ecpreflight perforce driver script.
+#
+# Copyright (c) 2008-2010 Electric Cloud, Inc.
+# All rights reserved
+
+use strict;
+use warnings;
+use File::Temp;
+use ECTest;
+use ECSCMTest;
+
+initCommander();
+
+$::N = $adminSession;
+
+# Based on the OS, set the file prefix to either c: or /opt, since the driver
+# script uses different parsing techniques on Windows than UNIX.
+# also set executable file extension
+
+if (isWindows()) {
+    $::gP = "A:";
+    $::pExt = ".exe";
+} else {
+    $::gP = "/ABC";
+    $::pExt = "";
+}
+
+## find path to installed Commander
+my $xPath = $::N->getProperty("/server/Electric Cloud/installDirectory");
+$::gCmdrHome = $xPath->findvalue('//value')->value;
+if ("$::gCmdrHome" eq "") {
+    print "ERROR: Could not find home directory for test commander instance\n";
+    exit 1;
+}
+
+# make sure scm mode is set to new
+$::N->setProperty("/ec_preflight/scm_mode","new");
+
+# get session for command line ecclientpreflight so each test
+# does not have to pass in a password
+print `"$::gCmdrHome/bin/ectool" --server localhost login admin changeme`;
+
+#------------------------------------------------------------------------------
+# runPerforce
+#
+#       Execute a shell command and collect its standard output and standard
+#       error separately.
+#
+# Results:
+#       The return value is a list with three elements: the standard output
+#       from the command, the standard error, and the exit status.
+#
+# Side Effects:
+#       The command is invoked.
+#
+# Arguments:
+#       command - Command to invoke.
+#------------------------------------------------------------------------------
+
+sub runPerforce($;$$) {
+    my ($command, $script, $input) = @_;
+
+    mkpath("$::gCurrentTestDir/logs");
+    $command = "\"$::gCmdrHome/bin/ecclientpreflight$::pExt\""
+       .  " $command --logDir \"$::gCurrentTestDir/logs\" 2>_err";
+
+    $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+    if (defined($script) && "$script" ne  "") {
+        $ENV{"ECPREFLIGHT_TEST_DRIVER"} = $script;
+    }
+
+    $ENV{FAKE_P4_SERVER} = 1;
+
+    my $logFile = "../../ecpreflight.log";
+    unlink($logFile);
+    my $out;
+    if (defined($input)) {
+        my (undef, $outputName) =
+                File::Temp::tempfile("ecout_XXXXXX", OPEN => 0,
+                DIR => File::Spec->tmpdir);
+        open(PIPE, "|-", "$command >\"$outputName\"");
+        print(PIPE $input);
+        close(PIPE);
+        $out = readFile($outputName);
+        unlink($outputName);
+    } else {
+        $out = `$command`;
+    }
+    my $err = readFile("_err");
+    unlink("_err");
+    my $log = readFile($logFile, 1);
+    unlink($logFile);
+    unlink("_script");
+    return ($out, $err, ($? >>8), $log);
+}
+
+#------------------------------------------------------------------------------
+# fakePerforce
+#
+#     This function takes an associative array as an argument, and treats each
+#     entry as a "request-response" pair for p4 commands.  It stores the
+#     response in the environment, keyed by the request.  To clean up the
+#     environment, perforceDown() should be called at the end of the ntest.
+#------------------------------------------------------------------------------
+
+sub fakePerforce(@)
+{
+    @::gFakedResponses = ();
+    my (@responses) = @_;
+    while (@responses > 0) {
+        my $request = shift @responses;
+        my $response = shift @responses;
+        $request = uc("p4_$request");
+        $request =~ s/[^\w]//g;
+        $ENV{$request} = $response;
+        push(@::gFakedResponses, $request);
+    }
+}
+
+#------------------------------------------------------------------------------
+# perforceDown
+#
+#     Cleans up the environment with all "request-response" pairs stored by
+#     calling fakePerforce.
+#------------------------------------------------------------------------------
+
+sub perforceDown()
+{
+    foreach my $request(@::gFakedResponses) {
+        delete $ENV{$request};
+    }
+}
+
+    
+ntest "perforce - using a fake server", {}, sub {
+    # skip entire cpf_driver, replace with nothing
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", 
+            "my \$doNothing=1;");
+
+    assertEq(outdent('
+        |Establishing a connection to ElectricCommander
+         Using a fake Perforce server for testing.
+         '), $out, "standard output");
+    assertEq("", $err, "error output");
+    assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - p4, arranged response", {}, sub {
+    my $script = '       
+        print $self->cpf_p4($opts,"opened");
+        ';
+    fakePerforce(
+        "opened" => outdent('
+               |//depot/blah.txt#1 - add default change (text)
+                //depot/hello.txt#5 - delete default change (text)
+                //depot/baz.txt#4 - delete default change (text)
+                '),
+        );
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+
+    assertEq(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+            //depot/blah.txt#1 - add default change (text)
+            //depot/hello.txt#5 - delete default change (text)
+            //depot/baz.txt#4 - delete default change (text)
+            '), $out, "standard output");
+    assertEq("", $err, "error output");
+    assertEq(0, $status, "exit code");
+};
+
+
+ntest "perforce - p4, no arranged response", {}, sub {
+    my $script = '
+        print $self->cpf_p4($opts,"opened");
+        ';
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+
+    assertEq(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+            '), $out, "standard output");
+    assertEq("ERROR: Pre-arranged command output for [P4_OPENED] not found in ENV.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+ntest "perforce - copyDeltas, check contents of scm info file", {}, sub {
+     # my $logDir = "$::gCurrentTestDir/logs";
+     # mkpath($logDir);
+     # my $script = '
+             # push @ {$opts->{rt_changelists} }, "default";
+             # push @ {$opts->{rt_changelists} }, "12345";
+             # $opts->{scm_port}       = "perf:4321";
+             # $opts->{scm_client}     = "test-client";
+             # $opts->{scm_template}   = "test-template";
+             # $opts->{scm_user}       = "myUser";
+             # $opts->{test_filename}  = "tempfile.txt";
+             # $opts->{rt_syncToChangelist}  = 34567;
+             # $self->cpf_copyDeltas($opts);            
+             # print "\nContents of perforce info:\n";
+             # open(FILE, "' . $logDir . '/ecpreflight_scmInfo");
+             # print <FILE>;
+             # print "\n";
+             # close FILE;
+         # ';
+     # fakePerforce(
+         # "opened -c default" => outdent('
+                # |//depot/blah.txt#1 - add default change (text)
+                 # //depot/hello.txt#5 - delete default change (text)
+                 # '),
+         # "opened -c 12345" => outdent('
+                # |//depot/baz.txt#4 - edit default change (text)
+                 # //depot/foo.txt#3 - branch default change (text)
+                 # //depot/bar.txt#2 - integrate default change (text)
+                # '),       
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+            # |//depot/blah.txt - file(s) up-to-date.
+            # '),
+#        "-x  \"tempfile.txt\" resolve -n" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+#        "-x \"tempfile.txt\ fstat -Op -T \"path depotFile action\"" => outdent('
+#                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),  
+        # );
+
+     # my ($out, $err, $status) = runPerforce(
+             # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+     # perforceDown();
+       
+    # assertSubstring(outdent('
+           # |Contents of perforce info:
+            # perf:4321
+            # test-template
+            # myUser
+            # 34567
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - copyDeltas, different types of files in p4 opened", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $share = "$::gCurrentTestDir/networkShare";
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{rt_latestChangelist}  = 34567;
+            # $opts->{test_filename}  = "tempfile.txt";
+            # $self->cpf_copyDeltas($opts);
+            # print "\nContents of delta manifest:\n";
+            # open(FILE, "' . $logDir . '/ecpreflight_deltas");
+            # print <FILE>;
+            # close FILE;
+            # print "\nContents of delete manifest:\n";
+            # open(FILE, "' . $logDir . '/ecpreflight_deletes");
+            # print <FILE>;
+            # close FILE;
+        # ';
+    # fakePerforce(
+        # "opened -c default" => outdent('
+               # |//depot/blah.txt#1 - add default change (text)
+                # //depot/hello.txt#5 - delete default change (text)
+                # //depot/baz.txt#4 - edit default change (text)
+                # //depot/foo.txt#3 - branch default change (text)
+                # //depot/bar.txt#2 - integrate default change (text)
+                # //depot/test.txt#3 - move/add default change (text)
+                # //depot/rndm.txt#2 - move/delete default change (text)
+                # '),
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+                # |//depot/blah.txt - file(s) up-to-date.
+                # '),
+        # "-x \"tempfile.txt\" resolve -n" => outdent('
+                # |//depot/blah.txt - no file(s) to resolve.
+                # '),
+        # '-x "tempfile.txt" fstat -Op -T "path depotFile action"' => outdent('
+                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),        
+        # );
+
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    # perforceDown();
+
+    # assertSubstring(outdent('
+           # |Contents of delta manifest:
+            # //test-client/blah.txt
+            # //test-client/baz.txt
+            # //test-client/foo.txt
+            # //test-client/bar.txt
+            # //test-client/test.txt
+
+            # Contents of delete manifest:
+            # //test-client/hello.txt
+            # //test-client/rndm.txt'), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - copyDeltas, p4 opened outputs combined", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # push @ {$opts->{rt_changelists} }, "12345";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{test_filename}  = "tempfile.txt";
+            # $opts->{rt_syncToChangelist}  = 34567;
+            # $::gDebug = 1;
+            # $self->cpf_copyDeltas($opts);
+        # ';
+    # fakePerforce(
+         # "opened -c default" => outdent('
+                # |//depot/blah.txt#1 - add default change (text)
+                 # //depot/hello.txt#5 - delete default change (text)
+                 # '),
+         # "opened -c 12345" => outdent('
+                # |//depot/baz.txt#4 - edit default change (text)
+                 # //depot/foo.txt#3 - branch default change (text)
+                 # //depot/bar.txt#2 - integrate default change (text)
+                # '),       
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+            # |//depot/blah.txt - file(s) up-to-date.
+            # '),
+        # "-x  \"tempfile.txt\" resolve -n" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+        # '-x "tempfile.txt" fstat -Op -T "path depotFile action"' => outdent('
+                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),  
+        # );
+
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);    
+    # perforceDown();
+
+    # assertDiff(outdent('
+           # |Establishing a connection to ElectricCommander
+            # Using a fake Perforce server for testing.
+            # Collecting delta information.
+                # saving scmInfo for agent:perf:4321
+            # test-template
+            # myUser
+            # 34567
+                # Adding SCM info file "' . $logDir . '/ecpreflight_scmInfo" to copy to ecpreflight_data/scmInfo
+                # Running Perforce command "opened -c default"
+                # Running Perforce command "opened -c 12345"
+                # output from opened=[//depot/blah.txt#1 - add default change (text)
+            # //depot/hello.txt#5 - delete default change (text)
+            # //depot/baz.txt#4 - edit default change (text)
+            # //depot/foo.txt#3 - branch default change (text)
+            # //depot/bar.txt#2 - integrate default change (text)
+                            # ]
+                # Running Perforce command "-x "tempfile.txt" sync -n"
+                # Running Perforce command "-x "tempfile.txt" resolve -n"
+                # Running Perforce command "-x "tempfile.txt" fstat -Op -T "path depotFile action""
+                # Deleting "//test-client/hello.txt".
+                # Deleting "//test-client/rndm.txt".
+                # Adding "' . $::gP . '\dev\blah.txt" to copy to "ecpreflight_files///test-client/blah.txt"
+                # Copying "//test-client/blah.txt".
+                # Adding "' . $::gP . '\dev\baz.txt" to copy to "ecpreflight_files///test-client/baz.txt"
+                # Copying "//test-client/baz.txt".
+                # Adding "' . $::gP . '\dev\foo.txt" to copy to "ecpreflight_files///test-client/foo.txt"
+                # Copying "//test-client/foo.txt".
+                # Adding "' . $::gP . '\dev\bar.txt" to copy to "ecpreflight_files///test-client/bar.txt"
+                # Copying "//test-client/bar.txt".
+                # Adding "' . $::gP . '\dev\test.txt" to copy to "ecpreflight_files///test-client/test.txt"
+                # Copying "//test-client/test.txt".
+                # Adding deletes file "' . $logDir 
+                    # . '/ecpreflight_deletes" to copy to ' . 'ecpreflight_data/deletes
+                # Adding deltas file "' . $logDir 
+                    # . '/ecpreflight_deltas" to copy to ' . 'ecpreflight_data/deltas
+                # Adding directories file "' . $logDir 
+                    # . '/ecpreflight_directories" to copy to ' . 'ecpreflight_data/directories
+                # Client Driver completed.
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+# now we use the -x option for fstat this test case might not be necesary
+# ntest "perforce - copyDeltas, space in file name", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{rt_syncToChangelist}  = 34567;
+            # $::gDebug = 1;
+            # $self->cpf_copyDeltas($opts);
+        # ';
+    # fakePerforce(
+        # "opened -c default" => outdent('
+               # |//depot/foo bar.txt#1 - add default change (text)
+                # '),
+        # "sync -n //depot/foo bar.txt\"" => outdent('
+                # |//depot/foo bar.txt - file(s) up-to-date.
+                # '),
+        # "resolve -n //depot/foo bar.txt\"" => outdent('
+                # |//depot/foo bar.txt - no file(s) to resolve.
+                # '),
+        # "fstat -Op -T \"path clientFile\" \"//depot/foo bar.txt\"" => outdent('
+                # |... clientFile //test-client/foo bar.txt
+# ... path '. $::gP . '\dev\foo bar.txt
+                # '),
+        # );
+
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    # perforceDown();
+
+    # assertDiff(outdent('
+           # |Establishing a connection to ElectricCommander
+            # Using a fake Perforce server for testing.
+            # Collecting delta information.
+                # saving scmInfo for agent:perf:4321
+            # test-template
+            # myUser
+            # 34567
+                # Adding SCM info file "' . $logDir
+                        # . '/ecpreflight_scmInfo" to copy to '
+                        # . 'ecpreflight_data/scmInfo
+                # Running Perforce command "opened -c default"
+                # output from opened=[//depot/foo bar.txt#1 - add default change (text)]
+                # Running Perforce command "sync -n //depot/foo bar.txt"
+                # Running Perforce command "resolve -n //depot/foo bar.txt"
+                # Running Perforce command "fstat -Op -T "path clientFile" "//depot/foo bar.txt""
+                # Adding "' . $::gP . '\dev\foo bar.txt" to copy to '
+                        # . '"ecpreflight_files/foo bar.txt"
+                # Copying "foo bar.txt".
+                # Adding deletes file "' . $logDir
+                        # . '/ecpreflight_deletes" to copy to '
+                        # . 'ecpreflight_data/deletes
+                # Adding deltas file "' . $logDir
+                        # . '/ecpreflight_deltas" to copy to '
+                        # . 'ecpreflight_data/deltas
+                # Adding directories file "' . $logDir
+                        # . '/ecpreflight_directories" to copy to '
+                        # . 'ecpreflight_data/directories
+                # Client Driver completed.
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+# };
+
+ntest "perforce - copyDeltas, deltas manifest", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $share = "$::gCurrentTestDir/networkShare";
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # push @ {$opts->{rt_changelists} }, "12345";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{rt_latestChangelist}  = 34567;
+            # $opts->{test_filename}  = "tempfile.txt";
+            # $self->cpf_copyDeltas($opts);
+            # print "\nContents of delta manifest:\n";
+            # open(FILE, "' . $logDir . '/ecpreflight_deltas");
+            # print <FILE>;
+            # close FILE;
+        # ';
+
+         # fakePerforce(
+         # "opened -c default" => outdent('
+                # |//depot/blah.txt#1 - add default change (text)
+                 # //depot/hello.txt#5 - delete default change (text)
+                 # '),
+         # "opened -c 12345" => outdent('
+                # |//depot/baz.txt#4 - edit default change (text)
+                 # //depot/foo.txt#3 - branch default change (text)
+                 # //depot/bar.txt#2 - integrate default change (text)
+                # '),       
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+            # |//depot/blah.txt - file(s) up-to-date.
+            # '),
+        # "-x  \"tempfile.txt\" resolve -n" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+        # "-x \"tempfile.txt\ fstat -Op -T \"path depotFile action\"" => outdent('
+                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),  
+        # );        
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    # perforceDown();
+
+    # assertSubstring(outdent('
+           # |Contents of delta manifest:
+            # //test-client/blah.txt
+            # //test-client/baz.txt
+            # //test-client/foo.txt
+            # //test-client/bar.txt
+            # //test-client/test.txt
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - copyDeltas, deletes manifest", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # push @ {$opts->{rt_changelists} }, "12345";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{rt_latestChangelist}  = 34567;
+            # $opts->{test_filename}  = "tempfile.txt";
+            # $self->cpf_copyDeltas($opts);
+            # print "\nContents of delete manifest:\n";
+            # open(FILE, "' . $logDir . '/ecpreflight_deletes");
+            # print <FILE>;
+            # close FILE;
+        # ';
+    # fakePerforce(
+         # "opened -c default" => outdent('
+                # |//depot/blah.txt#1 - add default change (text)
+                 # //depot/hello.txt#5 - delete default change (text)
+                 # '),
+         # "opened -c 12345" => outdent('
+                # |//depot/baz.txt#4 - edit default change (text)
+                 # //depot/foo.txt#3 - branch default change (text)
+                 # //depot/bar.txt#2 - integrate default change (text)
+                # '),       
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+            # |//depot/blah.txt - file(s) up-to-date.
+            # '),
+        # "-x  \"tempfile.txt\" resolve -n" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+        # "-x \"tempfile.txt\ fstat -Op -T \"path depotFile action\"" => outdent('
+                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),  
+        # );
+
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    # perforceDown();
+
+    # assertSubstring(outdent('
+           # |Contents of delete manifest:
+            # //test-client/hello.txt
+            # //test-client/rndm.txt
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - copyDeltas, check the files passed to putFiles", {}, sub {
+    # my $logDir = "$::gCurrentTestDir/logs";
+    # mkpath($logDir);
+    # my $script = '
+            # push @ {$opts->{rt_changelists} }, "default";
+            # push @ {$opts->{rt_changelists} }, "12345";
+            # $opts->{scm_port}       = "perf:4321";
+            # $opts->{scm_client}     = "test-client";
+            # $opts->{scm_template}   = "test-template";
+            # $opts->{scm_user}       = "myUser";
+            # $opts->{rt_latestChangelist}  = 34567;
+            # $opts->{test_filename}  = "tempfile.txt";
+            # $self->cpf_copyDeltas($opts);
+            # print "\nFiles passed to putFiles:\n";
+            # foreach my $key (sort keys(%::gFilesToUpload)) {
+                # print "$key : " . $::gFilesToUpload{$key} . "\n";
+            # }
+        # ';
+#    # fakePerforce(
+#        # "opened -c default" => outdent('
+#               # |//depot/blah.txt#1 - add default change (text)
+#                # //depot/hello.txt#5 - delete default change (text)
+#                # '),
+#        # "opened -c 12345" => outdent('
+#               # |//depot/baz.txt#4 - edit default change (text)
+#                # //depot/foo.txt#3 - branch default change (text)
+#                # //depot/bar.txt#2 - integrate default change (text)
+#                # '),
+#        # "sync -n //depot/blah.txt\"" => outdent('
+#                # |//depot/blah.txt - file(s) up-to-date.
+#                # '),
+#        # "resolve -n //depot/blah.txt\"" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+#        # "fstat -Op -T \"path clientFile\" \"//depot/blah.txt\"" => outdent('
+#                # |... clientFile //test-client/blah.txt
+## ... path '. $::gP . '\dev\blah.txt
+#                # '),
+#        # "sync -n //depot/hello.txt\"" => outdent('
+#                # |//depot/hello.txt - file(s) up-to-date.
+#                # '),
+#        # "resolve -n //depot/hello.txt\"" => outdent('
+#                # |//depot/hello.txt - no file(s) to resolve.
+#                # '),
+#        # "fstat -Op -T \"path clientFile\" \"//depot/hello.txt\"" => outdent('
+#                # |... clientFile //test-client/hello.txt
+## ... path '. $::gP . '\dev\hello.txt
+#                # '),
+#        # "sync -n //depot/baz.txt\"" => outdent('
+#                # |//depot/baz.txt - file(s) up-to-date.
+#                # '),
+#        # "resolve -n //depot/baz.txt\"" => outdent('
+#                # |//depot/bar.txt - no file(s) to resolve.
+#                # '),
+#        # "fstat -Op -T \"path clientFile\" \"//depot/baz.txt\"" => outdent('
+#                # |... clientFile //test-client/baz.txt
+## ... path '. $::gP . '\dev\baz.txt
+#                # '),
+#        # "sync -n //depot/foo.txt\"" => outdent('
+#                # |//depot/foo.txt - file(s) up-to-date.
+#                # '),
+#        # "resolve -n //depot/foo.txt\"" => outdent('
+#                # |//depot/foo.txt - no file(s) to resolve.
+#                # '),
+#        # "fstat -Op -T \"path clientFile\" \"//depot/foo.txt\"" => outdent('
+#                # |... clientFile //test-client/foo.txt
+## ... path '. $::gP . '\dev\foo.txt
+#                # '),
+#        # "sync -n //depot/bar.txt\"" => outdent('
+#                # |//depot/bar.txt - file(s) up-to-date.
+#                # '),
+#        # "resolve -n //depot/bar.txt\"" => outdent('
+#                # |//depot/bar.txt - no file(s) to resolve.
+#                # '),
+#        # "fstat -Op -T \"path clientFile\" \"//depot/bar.txt\"" => outdent('
+#                # |... clientFile //test-client/bar.txt
+## ... path '. $::gP . '\dev\bar.txt
+#                # '),
+#        # );
+        
+        # fakePerforce(
+         # "opened -c default" => outdent('
+                # |//depot/blah.txt#1 - add default change (text)
+                 # //depot/hello.txt#5 - delete default change (text)
+                 # '),
+         # "opened -c 12345" => outdent('
+                # |//depot/baz.txt#4 - edit default change (text)
+                 # //depot/foo.txt#3 - branch default change (text)
+                 # //depot/bar.txt#2 - integrate default change (text)
+                # '),       
+        # "-x \"tempfile.txt\" sync -n" => outdent('
+            # |//depot/blah.txt - file(s) up-to-date.
+            # '),
+        # "-x  \"tempfile.txt\" resolve -n" => outdent('
+#                # |//depot/blah.txt - no file(s) to resolve.
+#                # '),
+        # "-x \"tempfile.txt\ fstat -Op -T \"path depotFile action\"" => outdent('
+                 # |... depotFile //test-client/hello.txt
+# ... path '. $::gP . '\dev\hello.txt
+# ... action delete
+
+# ... depotFile //test-client/rndm.txt
+# ... path '. $::gP . '\dev\rndm.txt
+# ... action delete
+
+# ... depotFile //test-client/blah.txt
+# ... path '. $::gP . '\dev\blah.txt
+# ... action add
+
+# ... depotFile //test-client/baz.txt
+# ... path '. $::gP . '\dev\baz.txt
+# ... action add
+
+# ... depotFile //test-client/foo.txt
+# ... path '. $::gP . '\dev\foo.txt
+# ... action add
+
+# ... depotFile //test-client/bar.txt
+# ... path '. $::gP . '\dev\bar.txt
+# ... action add
+
+# ... depotFile //test-client/test.txt
+# ... path '. $::gP . '\dev\test.txt
+# ... action add'),  
+        # );
+
+    # my ($out, $err, $status) = runPerforce(
+            # "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    # perforceDown();
+
+    # assertSubstring(outdent('
+           # |Establishing a connection to ElectricCommander
+            # Using a fake Perforce server for testing.
+            # Collecting delta information.
+                # Deleting "//test-client/hello.txt".
+                # Deleting "//test-client/rndm.txt".
+                # Copying "//test-client/blah.txt".
+                # Copying "//test-client/baz.txt".
+                # Copying "//test-client/foo.txt".
+                # Copying "//test-client/bar.txt".
+                # Copying "//test-client/test.txt".
+            # '), $out, "standard output");
+    # assertEq("", $err, "error output");
+    # assertEq(0, $status, "exit code");
+};
+
+ntest "perforce - autoCommit, changelist modification", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            push @ {$opts->{rt_changelists} }, "default";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_latestChangelist}  = 34567;
+            $opts->{opt_DieOnNewCheckins}       = 0;
+            $opts->{opt_DieOnWorkspaceChanges}  = 0;
+            $opts->{rt_openedFiles}  = "foo bar baz";
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                '),
+        "opened -c default" => outdent('
+               |//depot/blah.txt#1 - add default change (text)
+                //depot/hello.txt#5 - delete default change (text)
+                '),
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "opened -c default"
+            '), $out, "standard output");
+    assertEq("ERROR: Files have been added and/or removed from the selected "
+            . "changelists since the preflight build was launched.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+
+ntest "perforce - autoCommit, die on new changelist", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            #push @ {$opts->{rt_changelists} }, "default";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_latestChangelist}  = "12345";
+            $opts->{opt_DieOnNewCheckins}  = 1;
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "changes -m1"
+                Latest checked-in changelist: 12346
+            '), $out, "standard output");
+    assertEq("ERROR: A check-in has been made since ecpreflight was started. "
+            . "Sync and resolve conflicts, then retry the preflight build.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+ntest "perforce - autoCommit, die immediately on opened file changes",
+        {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            #push @ {$opts->{rt_changelists} }, "default";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_latestChangelist}  = 12345;
+            $opts->{opt_DieOnNewCheckins}       = 0;
+            $opts->{opt_DieOnWorkspaceChanges}  = 0;
+            $opts->{opt_DieOnFileChanges}       = 1;
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                ... //depot/test.txt - must resolve #15 before submitting
+                '),
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "changes -m1"
+                Latest checked-in changelist: 12346
+                Running Perforce command "sync -n"
+            '), $out, "standard output");
+    assertEq("ERROR: Opened files are out of sync with the head. Sync and "
+            . "resolve conflicts, then retry the preflight build.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+ntest "perforce - autoCommit, die when resolving opened file changes",
+        {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            #push @ {$opts->{rt_changelists} }, "default";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_latestChangelist}  = 12345;
+            $opts->{opt_DieOnNewCheckins}       = 0;
+            $opts->{opt_DieOnWorkspaceChanges}  = 0;
+            $opts->{opt_DieOnFileChanges}       = 0;
+            #$opts->{rt_openedFiles}  = "foo bar baz";
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                ... //depot/test.txt - must resolve #15 before submitting
+                '),
+        "sync" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                ... //depot/test.txt - must resolve #15 before submitting
+                '),
+        "resolve -am" => outdent('
+               |test.txt - merging //depot/test.txt#16
+                Diff chunks: 0 yours + 0 theirs + 0 both + 1 conflicting
+                //dummy-client/test.txt - resolve skipped.
+                '),
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "changes -m1"
+                Latest checked-in changelist: 12346
+                Running Perforce command "sync -n"
+                Running Perforce command "sync"
+                Running Perforce command "resolve -am"
+            '), $out, "standard output");
+    assertEq("ERROR: Could not auto-resolve conflicts. Manually resolve "
+            . "conflicts, then retry the preflight build.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+
+ntest "perforce - autoCommit, die on changes without overlaps", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            #push @ {$opts->{rt_changelists} }, "default";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_latestChangelist}  = 12345;
+            $opts->{opt_DieOnNewCheckins}       = 0;
+            $opts->{opt_DieOnWorkspaceChanges}  = 1;
+            $opts->{opt_DieOnFileChanges}       = 1;
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                '),
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "changes -m1"
+                Latest checked-in changelist: 12346
+                Running Perforce command "sync -n"
+            '), $out, "standard output");
+    assertEq("ERROR: The client \"test-client\" is out of sync with the head. "
+            . "Sync and resolve conflicts, then retry the preflight build.\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+ntest "perforce - autoCommit, successful submission", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            push @ {$opts->{rt_changelists} }, "default";
+            push @ {$opts->{rt_changelists} }, "12345";
+            $opts->{scm_port}       = "perf:4321";
+            $opts->{scm_client}     = "test-client";
+            $opts->{scm_template}   = "test-template";
+            $opts->{scm_user}       = "myUser";
+            $opts->{rt_syncToChangelist}  = 12345;
+            $opts->{rt_openedFiles}  = 
+"//depot/blah.txt#1 - add default change (text)
+//depot/hello.txt#5 - delete default change (text)
+//depot/baz.txt#4 - edit default change (text)
+//depot/foo.txt#3 - branch default change (text)
+//depot/bar.txt#2 - integrate default change (text)";
+            $opts->{opt_DieOnNewCheckins}       = 0;
+            $opts->{opt_DieOnWorkspaceChanges}  = 0;
+            $opts->{opt_DieOnFileChanges}       = 0;
+            $opts->{scm_commitComment}          = "submit these changes";
+            $::gDebug = 1;
+            $::gJobNotesId = 3456;
+            $self->cpf_autoCommit($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    fakePerforce(
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                '),
+        "opened -c default" => outdent('
+               |//depot/blah.txt#1 - add default change (text)
+                //depot/hello.txt#5 - delete default change (text)
+                '),
+        "opened -c 12345" => outdent('
+               |//depot/baz.txt#4 - edit default change (text)
+                //depot/foo.txt#3 - branch default change (text)
+                //depot/bar.txt#2 - integrate default change (text)
+                '),
+        "submit -d \"submit these changes\"" => "dummy",
+        "submit -c 12345" => "dummy",
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_minimum.xml\"", $script);
+    perforceDown();
+    serverDown();
+
+    assertDiff(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+                Running Perforce command "opened -c default"
+                Running Perforce command "opened -c 12345"
+                Running Perforce command "changes -m1"
+                Latest checked-in changelist: 12346
+                Running Perforce command "sync -n"
+            Committing changes.
+                Running Perforce command "submit -d "submit these changes""
+                Running Perforce command "submit -c 12345"
+            Changes have been successfully submitted.
+                Client Driver completed.
+            '), $out, "standard output");
+    assertEq("", $err, "error output");
+    assertEq(0, $status, "exit code");
+};
+
+sub perforceDriverHelper()
+{
+    fakePerforce(
+        "login smith" => "dummy",
+        "changes -m1" => outdent('
+               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+                '),
+        "sync -n" => outdent('
+               |//depot/test.txt#15 - is opened and not being changed
+                '),
+        "opened -c default" => outdent('
+               |//depot/blah.txt#1 - add default change (text)
+                '),
+        "opened -c 12345" => outdent('
+               |//depot/baz.txt#4 - edit default change (text)
+                '),
+        "resolve -n" => outdent('
+                |No file(s) to resolve.
+                '),
+        "fstat -Op -T \"path clientFile\" \"//depot/blah.txt\"" => outdent('
+                |... clientFile //test-client/blah.txt
+... path '. $::gP . '\dev\blah.txt
+                '),
+        "fstat -Op -T \"path clientFile\" \"//depot/baz.txt\"" => outdent('
+                |... clientFile //test-client/baz.txt
+... path '. $::gP . '\dev\baz.txt
+                '),
+        "submit -d \"submit these changes\"" => "dummy",
+        "submit -c 12345" => "dummy",
+        );
+}
+
+
+ntest "perforce - driver, --help", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '';
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_full.xml\" --help", $script);
+    perforceDown();
+
+    assertSubstring(
+'Perforce Options:
+  --p4port <port>           The value of P4PORT.  May also be set in the
+                            environment or using p4 set.
+  --p4user <user>           The value of P4USER.  May also be set in the
+                            environment or using p4 set.
+                            not specified.
+  --p4passwd <password>     The value of P4PASSWD.  May also be set in the
+                            environment or using p4 set.
+  --p4client <client>       The value of P4CLIENT.  May also be set in the
+                            environment or using p4 set.
+  --p4template <template>   The name of a Perforce client used to create a base
+                            snapshot before overlaying local changes.  Defaults
+                            to the value of --p4client if not specified.
+  --p4stream   <stream>     The name of a Perforce stream used to create a base
+                            snapshot before overlaying local changes.
+  --p4changelist <change>   The changelist number (or default) whose changes
+                            are being tested.  May be specified multiple times.
+                            If no changelists are specified, all changelists
+                            for the client will be used.
+', $out, "standard output");
+    assertEq("", $err, "error output");
+    assertEq(0, $status, "exit code");
+};
+
+#ntest "perforce - driver, information passed on command line", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "port: $opts->{scm_port}\n";
+#            print "user: $opts->{scm_user}\n";
+#            print "password: $opts->{scm_password}\n";
+#            print "client: $opts->{scm_client}\n";
+#            print "template: $opts->{scm_template}\n";
+#            print "changelists:";
+#            foreach my $c (@ {$opts->{rt_changelists}} ) {
+#                print " $c";
+#            }
+#            print "\n";
+#            print "autocommit: $opts->{scm_autoCommit}\n";
+#            print "comment: $opts->{scm_commitComment}\n";
+#        ';
+#    fakePerforce(
+#        "login green" => "dummy",
+#        "changes -m1" => outdent('
+#               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+#                '),
+#        "sync -n" => outdent('
+#               |//depot/test.txt#15 - is opened and not being changed
+#                '),
+#        "opened -c 12345" => outdent('
+#               |//depot/blah.txt#1 - add default change (text)
+#                '),
+#        "opened -c 67890" => outdent('
+#               |//depot/baz.txt#4 - edit default change (text)
+#                '),
+#        "resolve -n" => outdent('
+#                |No file(s) to resolve.
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/blah.txt\"" => outdent('
+#                |... clientFile //test-client/blah.txt
+#... path '. $::gP . '\dev\blah.txt
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/baz.txt\"" => outdent('
+#                |... clientFile //test-client/baz.txt
+#... path '. $::gP . '\dev\baz.txt
+#                '),
+#        "submit -d \"foobar\"" => "dummy",
+#        "submit -c 12345" => "dummy",
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_full.xml\" "
+#            . "--p4port perforce:1234 "
+#            . "--p4user green "
+#            . "--p4passwd barbaz "
+#            . "--p4client test-client-2 "
+#            . "--p4template test-template-2 "
+#            . "--p4changelist 12345 "
+#            . "--p4changelist 67890 "
+#            . "--autoCommit 0 "
+#            . "--commitComment foobar ", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#       |Establishing a connection to ElectricCommander
+#        Using a fake Perforce server for testing.
+#        Using a fake Perforce server for testing.
+#        Executing Perforce actions for ecpreflight.
+#        Collecting delta information.
+#            Copying "//depot/blah.txt".
+#            Copying "//depot/baz.txt".
+#        
+#        port: perforce:1234
+#        user: green
+#        password: barbaz
+#        client: test-client-2
+#        template: test-template-2
+#        changelists: 12345 67890
+#        autocommit: 0
+#        comment: foobar
+#        '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, default p4user to cmdr user", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "user: $opts->{scm_user}\n";
+#        ';
+#    fakePerforce(
+#        "login smith" => "dummy",
+#        "changes -m1" => outdent('
+#               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+#                '),
+#        "sync -n" => outdent('
+#               |//depot/test.txt#15 - is opened and not being changed
+#                '),
+#        "opened -c 12345" => outdent('
+#               |//depot/blah.txt#1 - add default change (text)
+#                '),
+#        "opened -c 67890" => outdent('
+#               |//depot/baz.txt#4 - edit default change (text)
+#                '),
+#        "resolve -n" => outdent('
+#                |No file(s) to resolve.
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/blah.txt\"" => outdent('
+#                |... clientFile //test-client/blah.txt
+#... path '. $::gP . '\dev\blah.txt
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/baz.txt\"" => outdent('
+#                |... clientFile //test-client/baz.txt
+#... path '. $::gP . '\dev\baz.txt
+#                '),
+#        "submit -d \"foobar\"" => "dummy",
+#        "submit -c 12345" => "dummy",
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_full.xml\" "
+#            . "--p4port perforce:1234 "
+#            . "--p4passwd barbaz "
+#            . "--p4client test-client-2 "
+#            . "--p4template test-template-2 "
+#            . "--p4changelist 12345 "
+#            . "--p4changelist 67890 "
+#            . "--autoCommit 0 "
+#            . "--commitComment foobar ", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#       |Establishing a connection to ElectricCommander
+#        Using a fake Perforce server for testing.
+#        Using a fake Perforce server for testing.
+#        Executing Perforce actions for ecpreflight.
+#        Collecting delta information.
+#            Copying "//depot/blah.txt".
+#            Copying "//depot/baz.txt".
+#        
+#        user: smith
+#        '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, information passed in config file", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "port: $opts->{scm_port}\n";
+#            print "user: $opts->{scm_user}\n";
+#            print "password: $opts->{scm_password}\n";
+#            print "client: $opts->{scm_client}\n";
+#            print "template: $opts->{scm_template}\n";
+#            print "changelists:";
+#            foreach my $c (@ {$opts->{rt_changelists}} ) {
+#                print " $c";
+#            }
+#            print "\n";
+#            print "autocommit: $opts->{scm_autoCommit}\n";
+#            print "comment: $opts->{scm_commitComment}\n";
+#        ';
+#    perforceDriverHelper();
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_full.xml\" "
+#            . "--autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |port: perf:4444
+#            user: smith
+#            password: foobar
+#            client: test-client
+#            template: test-template
+#            changelists: default 12345
+#            autocommit: 0
+#            comment: submit these changes
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, use the user's client as the template", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "client: $opts->{scm_client}\n";
+#            print "template: $opts->{scm_template}\n";
+#        ';
+#    perforceDriverHelper();
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_notemplate.xml\" "
+#            . "--autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |client: my-client-1
+#            template: my-client-1
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, no changelists provided, changelists found",
+#        {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "changelists:";
+#            foreach my $c (@ {$opts->{rt_changelists}} ) {
+#                print " $c";
+#            }
+#            print "\n";
+#        ';
+#    perforceDriverHelper();
+#    fakePerforce(
+#        "changelists -s pending -c \"my-client-1\"" => outdent('
+#                |Change 12345 on 2008/07/22 by user@my-client-1 *pending* '
+#                        . '\'my first changelist\'
+#                 Change 23456 on 2008/07/22 by user@my-client-1 *pending* '
+#                        . '\'my second changelist\'
+#                '),
+#        "opened -c 23456" => outdent('
+#               |//depot/foo.txt#1 - add default change (text)
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/foo.txt\"" => outdent('
+#                |... clientFile //test-client/foo.txt
+#... path '. $::gP . '\dev\foo.txt
+#                '),
+#        "submit -c 23456" => "dummy",
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nochangelists.xml\" "
+#            . "--autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |changelists: default 12345 23456
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, no changelists provided, one empty",
+#        {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "changelists:";
+#            foreach my $c (@ {$opts->{rt_changelists}} ) {
+#                print " $c";
+#            }
+#            print "\n";
+#        ';
+#    perforceDriverHelper();
+#    fakePerforce(
+#        "changelists -s pending -c \"my-client-1\"" => outdent('
+#                |Change 12345 on 2008/07/22 by user@my-client-1 *pending* '
+#                        . '\'my first changelist\'
+#                 Change 23456 on 2008/07/22 by user@my-client-1 *pending* '
+#                        . '\'my second changelist\'
+#                '),
+#        "opened -c default" => outdent('
+#                |File(s) not opened on this client.
+#                '),
+#        "opened -c 23456" => outdent('
+#               |//depot/foo.txt#1 - add default change (text)
+#                '),
+#        "fstat -Op -T \"path clientFile\" \"//depot/foo.txt\"" => outdent('
+#                |... clientFile //test-client/foo.txt
+#... path '. $::gP . '\dev\foo.txt
+#                '),
+#        "submit -c 23456" => "dummy",
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nochangelists.xml\" "
+#            . "--autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |changelists: 12345 23456
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+ntest "perforce - driver, no changelists provided or found", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            # turn off test driver so we run real driver
+            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+            $self->cpf_driver($opts);
+        ';
+    perforceDriverHelper();
+    fakePerforce(
+        "changelists -s pending -c \"my-client-1\"" => outdent('
+                |
+                '),
+        "opened -c default" => outdent('
+                |File(s) not opened on this client.
+                '),
+        "opened -c 23456" => outdent('
+               |//depot/foo.txt#1 - add default change (text)
+                '),
+        "fstat -Op -T \"path clientFile\" \"//depot/foo.txt\"" => outdent('
+                |... clientFile //test-client/foo.txt
+... path '. $::gP . '\dev\foo.txt
+                '),
+        "submit -c 23456" => "dummy",
+        );
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_nochangelists.xml\" "
+            . "--autoCommit 0", $script);
+    perforceDown();
+
+    assertEq("ERROR: No active changelists found in client \"my-client-1\".\n",
+            $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+ntest "perforce - driver, no autocommit comment, default changelist", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            # turn off test driver so we run real driver
+            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+            $self->cpf_driver($opts);
+        ';
+    perforceDriverHelper();
+
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_nocomment.xml\"", $script);
+    perforceDown();
+
+    assertEq(outdent('
+           |Establishing a connection to ElectricCommander
+            Using a fake Perforce server for testing.
+            Using a fake Perforce server for testing.
+            Executing Perforce actions for ecpreflight.
+            '), $out, "standard output");
+    assertEq("ERROR: A changelist description is required when running a job when "
+            . "autocommit is enabled.  May also be passed on the command "
+            . "line using --commitComment.\n", $err, "error output");
+    assertEq(1, $status, "exit code");
+};
+
+#ntest "perforce - driver, no password specified", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "PASSWD[$opts->{scm_password}]\n";
+#        ';
+#    perforceDriverHelper();
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nopassword.xml\" "
+#            . "--debug 1 --autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |    Bypassing Perforce login since no password was specified
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, store latest changelist", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#            print "\n";
+#            print "last change: $opts->{rt_syncToChangelist}\n";
+#        ';
+#    perforceDriverHelper();
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nopassword.xml\" "
+#            . "--autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |last change: 
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+#ntest "perforce - driver, opened files are out of sync with head", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#        ';
+#    fakePerforce(
+#        "login smith" => "dummy",
+#        "changes -m1" => outdent('
+#               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+#                '),
+#        "sync -n" => outdent('
+#               |//depot/test.txt#15 - is opened and not being changed
+#                ... //depot/test.txt - must resolve #15 before submitting
+#                '),
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nopassword.xml\" "
+#            . "--debug 1 --autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |    Bypassing Perforce login since no password was specified
+#                Running Perforce command "changes -m1"
+#                Latest checked-in changelist: 12346
+#                Running Perforce command "sync -n"
+#            '), $out, "standard output");
+#    assertEq("ERROR: Opened files are out of sync with the head. Sync and "
+#            . "resolve conflicts, then retry the preflight build.\n",
+#            $err, "error output");
+#    assertEq(1, $status, "exit code");
+#};
+
+#ntest "perforce - driver, opened files have conflicts", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#        ';
+#    fakePerforce(
+#        "login smith" => "dummy",
+#        "changes -m1" => outdent('
+#               |Change 12346 on 2008/05/01 by user@email \'Merge\'
+#                '),
+#        "sync -n" => outdent('
+#               |//depot/test.txt#15 - is opened and not being changed
+#                '),
+#        "resolve -n" => outdent('
+#               |//depot/test.txt#15 - merging //depot/test.txt#15
+#                '),
+#        );
+#
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_nopassword.xml\" "
+#            . "--debug 1 --autoCommit 0", $script);
+#    perforceDown();
+#
+#    assertSubstring(outdent('
+#           |    Bypassing Perforce login since no password was specified
+#                Running Perforce command "changes -m1"
+#                Latest checked-in changelist: 12346
+#                Running Perforce command "sync -n"
+#                Running Perforce command "resolve -n"
+#            '), $out, "standard output");
+#    assertEq("ERROR: Opened files have conflicts that need to be resolved. "
+#            . "Resolve conflicts, then retry the preflight build.\n",
+#            $err, "error output");
+#    assertEq(1, $status, "exit code");
+#};
+
+#ntest "perforce - driver, successful submission", {}, sub {
+#    my $logDir = "$::gCurrentTestDir/logs";
+#    mkpath($logDir);
+#    my $script = '
+#            # turn off test driver so we run real driver
+#            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+#            $self->cpf_driver($opts);
+#        ';
+#    fakeServer(
+#        "setProperty" => $::RESPONSE_PROLOG . outdent('
+#               |<response requestId="1">
+#                </response></responses>'),
+#        );
+#    perforceDriverHelper();
+#    my ($out, $err, $status) = runPerforce(
+#            "-c \"$::gTestFileDir/samples/p4_full.xml\"", $script);
+#    perforceDown();
+#    serverDown();
+#
+#    assertEq(outdent('
+#           |Establishing a connection to ElectricCommander
+#            Using a fake Perforce server for testing.
+#            Using a fake Perforce server for testing.
+#            Executing Perforce actions for ecpreflight.
+#            Collecting delta information.
+#                Copying "blah.txt".
+#                Copying "baz.txt".
+#            Committing changes.
+#            Changes have been successfully submitted.
+#            '), $out, "standard output");
+#    assertEq("", $err, "error output");
+#    assertEq(0, $status, "exit code");
+#};
+
+ntest "perforce - driver, unknown option", {}, sub {
+    my $logDir = "$::gCurrentTestDir/logs";
+    mkpath($logDir);
+    my $script = '
+            # turn off test driver so we run real driver
+            $ENV{"ECPREFLIGHT_TEST_DRIVER"} = "";
+            $self->cpf_driver($opts);
+        ';
+    fakeServer(
+        "setProperty" => $::RESPONSE_PROLOG . outdent('
+               |<response requestId="1">
+                </response></responses>'),
+        );
+    perforceDriverHelper();
+    my ($out, $err, $status) = runPerforce(
+            "-c \"$::gTestFileDir/samples/p4_full.xml\" -unknown option", $script);
+    perforceDown();
+    serverDown();
+
+    assertSubstring(outdent('
+           |Perforce Options:
+            '), $err, "stderr");
+    assertEq(outdent('
+       |Establishing a connection to ElectricCommander
+        Using a fake Perforce server for testing.
+        Using a fake Perforce server for testing.
+        Executing Perforce actions for ecpreflight.
+        '), $out, "stdout");
+    assertEq(1, $status, "exit code");
+};

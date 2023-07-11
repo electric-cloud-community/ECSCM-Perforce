@@ -1,0 +1,13 @@
+<project name="ECSCM-Perforce" default="package" basedir=".">
+	<description>
+        Build the ECSCM-Perforce plugin
+    </description>
+
+    <property name="buildconfigdir" value="../Plugin-In-A-Box/scripts" />
+    
+	<!-- plugin specific properties -->
+	<property name="pluginKey" value="ECSCM-Perforce" />
+	<property name="pluginVersion" value="1.0" />
+
+    <import file="${buildconfigdir}/buildTargets.xml"/>
+</project>

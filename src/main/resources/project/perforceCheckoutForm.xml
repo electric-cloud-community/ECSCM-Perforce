@@ -1,0 +1,114 @@
+<editor>
+	<help>https://docs.cloudbees.com/docs/cloudbees-cd/latest/plugins/ecscm-perforce#CheckoutCode</help>
+    <formElement>
+        <type>entry</type>
+        <label>Configuration:</label>
+        <property>config</property>
+        <required>1</required>
+        <configuration>1</configuration>
+        <documentation>The name of a saved SCM configuration </documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Destination Directory:</label>
+        <property>dest</property>
+        <documentation>The path where the source tree will be created, if the path is not absolute the files will be stored relative to the job&#39;s workspace.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Client Template:</label>
+        <property>template</property>
+        <documentation>An existing client, like "perforce-client-one",
+        which specifies the files to retrieve. A temporary
+        copy of the client will be created.</documentation>
+    </formElement>
+	<formElement>
+        <type>entry</type>
+        <label>Stream:</label>
+        <property>stream</property>
+        <documentation>Specifies the stream to be used to create the temporary client.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Branch:</label>
+        <property>branch</property>
+        <documentation>A depot path representing a branch.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Changelist:</label>
+        <property>changelist</property>
+        <documentation>The specific changelist to get. Options:
+        1) A specific changelist number
+        2) The string "have" in which case the workspace 'template" will be used
+        3) blank in which case the most recent changelist will be used</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Last Snapshot:</label>
+        <property>lastSnapshot</property>
+        <documentation>The start point for update log. Next changelist will be included in the update log. </documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Updates File:</label>
+        <property>updatesFile</property>
+        <documentation>If non blank, this is used as the name of a file to be written with the text change comments of all changes included in this checkout since the lastSnapshot</documentation>
+    </formElement>
+    <formElement>
+        <type>textarea</type>
+        <label>View:</label>
+        <property>view</property>
+        <documentation>
+          A newline separated list of client "view" lines in the form "depot;files". A temporary client will be created.
+          i.e. "//depot/main/...;main/...\n//depot/sdk/...;sdk/..."
+          //depot/main/... //tempclient/main/...
+          //depot/sdk/... //tempclient/sdk/...
+          ** Important: Use the same syntax for client specification that is used by perforce **</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Checkout Single File:</label>
+        <property>checkoutSingleFile</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked won't add ... to complete the paths on the View parameter.</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Force Sync:</label>
+        <property>forceSync</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked will perform a force sync</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Smart Sync:</label>
+        <property>smartSync</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked will perform an smart sync</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Standard Sync:</label>
+        <property>standardSync</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>1</initiallyChecked>
+        <documentation>If checked will perform a standard sync</documentation>
+    </formElement>
+    <formElement>
+        <type>checkbox</type>
+        <label>Delete untracked files:</label>
+        <property>deleteFiles</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>1</initiallyChecked>
+        <documentation>If checked will delete files in the client root used for incremental sync that aren't present in the depot. This option only works with incremental sync.</documentation>
+    </formElement>
+</editor>

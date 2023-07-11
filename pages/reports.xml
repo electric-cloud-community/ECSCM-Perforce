@@ -1,0 +1,7 @@
+<configDefinition>
+  <title>Perforce Changelog Report</title>
+  <helpLink>/link/showHelp?page=p4help</helpLink>     
+    <componentContainer>
+         <component plugin="@PLUGIN_KEY@" version="@PLUGIN_VERSION@" ref="Reports" />
+    </componentContainer>  
+</configDefinition>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<data>
+	<server>
+    	<userName>admin</userName>
+    	<hostName>localhost</hostName>
+    </server>
+    <procedure>
+		<projectName>Commander</projectName>
+		<procedureName>Master</procedureName>
+	</procedure>
+	<scm>
+	    <type>Perforce</type>
+	    <port>perf:4444</port>
+	    <user>smith</user>
+	    <password>foobar</password>
+	    <client>test-client</client>
+	    <template>test-template</template>
+	    <changelist>default</changelist>
+	    <changelist>12345</changelist>
+	    <autoCommit>1</autoCommit>
+	    <commitComment>submit these changes</commitComment>
+	</scm>
+</data>

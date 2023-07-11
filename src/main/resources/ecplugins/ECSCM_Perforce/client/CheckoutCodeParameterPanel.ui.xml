@@ -1,0 +1,9 @@
+<!DOCTYPE ui:UiBinder SYSTEM "http://dl.google.com/gwt/DTD/xhtml.ent">
+<ui:UiBinder xmlns:ui="urn:ui:com.google.gwt.uibinder"
+             xmlns:g="urn:import:com.google.gwt.user.client.ui"
+             xmlns:eui="urn:import:com.electriccloud.commander.gwt.client.ui">
+  <!--  <ui:with field="ec" type="ecinternal.client.ui.InternalResources"/> -->
+  <g:VerticalPanel>
+    <eui:FormBuilder ui:field="coParameterForm"/>
+  </g:VerticalPanel>
+</ui:UiBinder>

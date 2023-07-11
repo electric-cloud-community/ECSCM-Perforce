@@ -1,0 +1,9 @@
+<editor>
+    <formElement>
+        <type>entry</type>
+        <label>Client Template:</label>
+        <property>P4ClientOrDepot</property>
+        <required>1</required>
+        <documentation>An existing client, like "perforce-client-one", which specifies the files to watch.</documentation>
+    </formElement>
+</editor>

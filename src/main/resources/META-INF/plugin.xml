@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+    <key>ECSCM-Perforce</key>
+    <version>@PLUGIN_VERSION@</version>
+    <label>ECSCM-Perforce</label>
+    <integration>Perforce</integration>
+    <description>SCM Plugin for Perforce</description>
+    <author>CloudBees</author>
+    <authorUrl>http://www.electric-cloud.com/support</authorUrl>
+    <category>Source Code Management</category>
+    <help>ECSCM-Perforce_help.xml</help>
+    <depends min="1.1.0">ECSCM</depends>
+    <repositoryUrl>https://github.com/electric-cloud-community/ECSCM-Perforce</repositoryUrl> 
+    <commander-version min="4.0"/>
+    <customTypes>
+        <customType name="reports">
+            <displayName>Display Perforce Changelog Report</displayName>
+            <description>description for Perforce reports custom type.</description>
+            <page pageName="p4Reports" definition="pages/reports.xml"/>
+        </customType>
+        <customType name="CheckoutCode">
+            <parameterPanel>
+                <javascript>
+                    war/ecplugins.ECSCM_Perforce.CheckoutCodeParameterPanel/ecplugins.ECSCM_Perforce.CheckoutCodeParameterPanel.nocache.js
+                </javascript>
+                <help>/commander/pages/@PLUGIN_KEY@-@PLUGIN_VERSION@/ECSCM-Perforce_help?s=Administration&amp;ss=Plugins#CheckoutCode
+                </help>
+            </parameterPanel>
+        </customType>
+    </customTypes>
+    <components>
+        <component name="Reports">
+            <javascript>war/ecplugins.ECSCM.Reports/ecplugins.ECSCM.Reports.nocache.js</javascript>
+        </component>
+        <component name="CheckoutCodeParameterPanel">
+            <javascript>
+                war/ecplugins.ECSCM_Perforce.CheckoutCodeParameterPanel/ecplugins.ECSCM_Perforce.CheckoutCodeParameterPanel.nocache.js
+            </javascript>
+        </component>
+    </components>
+
+
+<detailedDescription>Perforce is a client-server software configuration management (SCM) system, used to keep track of work done by developers. The server maintains a master file repository called depot using a database, which users interact through command-line and GUI clients. The clients communicate with the server, which is responsible for executing the commands, to serve up file content, run event triggers, and keep a record of all of this in the database.
+
+The EC-Perforce plugin enables you to connect CloudBees CD to Perforce. It calls the the Perforce p4 command line interface to pass in the user-provided parameters, enabling you to perform:
+
+* Code checkout (referred to as sync in Perforce).
+* Preflight builds.
+* Continuous integration.
+* Smart Sync: syncs a client and workspace to a pristine condition without need to download all the changes every time. This can be very useful if you have a large code base.
+</detailedDescription>
+<catalogLabel>Perforce</catalogLabel>
+</plugin>

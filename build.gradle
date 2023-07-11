@@ -1,0 +1,61 @@
+// -*- Groovy -*-
+// build.gradle
+//
+// Gradle build script for EC-JBoss plugin.
+//
+// Copyright (c) 2015 Electric Cloud, Inc.
+// All rights reserved
+
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven {
+            url 'https://nexus-internal.cloudbees.com/content/repositories/snapshots'
+            credentials {
+                username = System.getenv('NEXUS_USERNAME') ?: nexusUsername
+                password = System.getenv('NEXUS_PASSWORD') ?: nexusPassword
+            }
+        }
+        maven {
+            url 'https://nexus-internal.cloudbees.com/content/groups/mirror'
+            credentials {
+                username = System.getenv('NEXUS_USERNAME') ?: nexusUsername
+                password = System.getenv('NEXUS_PASSWORD') ?: nexusPassword
+            }
+        }
+    }
+    dependencies {
+        classpath group: 'com.electriccloud.plugins', name: 'flow-gradle-plugin', version: '2.4'
+    }
+}
+
+repositories {
+    mavenCentral()
+    // maven { url 'https://repo.cloudbees.com/content/repositories/dev-connect' }
+    maven {
+        url 'https://nexus-internal.cloudbees.com/content/groups/mirror'
+        credentials {
+            username = System.getenv('NEXUS_USERNAME') ?: nexusUsername
+            password = System.getenv('NEXUS_PASSWORD') ?: nexusPassword
+        }
+    }
+}
+
+group = "com.electriccloud"
+description = "Plugins : ECSCM-Perforce"
+version = "2.9.3"
+
+apply plugin: 'flow-gradle-plugin'
+apply plugin: 'license'
+
+// license {
+//     header = file ('shortHeader.txt')
+//     exclude "**/project.xml"
+// }
+
+
+task wrapper(type: Wrapper) {
+	gradleVersion = '2.3'
+}
+

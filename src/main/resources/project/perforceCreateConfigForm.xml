@@ -1,0 +1,57 @@
+<editor>
+    <formElement>
+        <type>entry</type>
+        <label>Configuration Name:</label>
+        <property>config</property>
+        <required>1</required>
+    </formElement>
+    <formElement>
+        <type>textarea</type>
+        <label>Description:</label>
+        <property>desc</property>
+        <value>Perforce configuration</value>
+    </formElement>
+    <formElement>
+        <type>credential</type>
+        <label>Login As:</label>
+        <property>credential</property>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>P4PORT (host:port):</label>
+        <property>P4PORT</property>
+        <documentation>The host name and port number of the Perforce server specified as host:port.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>P4TICKETS:</label>
+        <property>P4TICKETS</property>
+        <documentation>The location of a ticket file for user authentication.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>P4CHARSET:</label>
+        <property>P4CHARSET</property>
+        <documentation>Character set used for translation of unicode files.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>P4COMMANDCHARSET:</label>
+        <property>P4COMMANDCHARSET</property>
+        <documentation>Used to support UTF-16 and UTF-32 character sets from the command-line client.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>P4HOST (override):</label>
+        <property>P4HOST</property>
+        <documentation>Overrides the real name of the Perforce client machine so that the Perforce server treats the request as coming from the specified client machine.</documentation>
+    </formElement>
+	<formElement>
+        <type>entry</type>
+        <label>Debug:</label>
+        <property>debug</property>
+        <value>1</value>
+        <documentation>Debug level for output.</documentation>
+        <required>0</required>
+    </formElement>
+</editor>

@@ -1,0 +1,48 @@
+<editor>
+    <help>https://docs.cloudbees.com/docs/cloudbees-cd/latest/plugins/ecscm-perforce#Preflight</help>
+    <formElement>
+        <type>entry</type>
+        <label>Configuration:</label>
+        <property>config</property>
+        <required>1</required>
+        <documentation>The name of a saved SCM configuration </documentation>
+    </formElement>
+	<formElement>
+        <type>entry</type>
+        <label>Destination Directory:</label>
+        <property>dest</property>
+        <documentation>The path where the source tree will be created, if the path is not absolute the files will be stored relative to the job&#39;s workspace.</documentation>
+    </formElement>
+    <formElement>
+        <type>entry</type>
+        <label>Permanent perforce client name:</label>
+        <property>permanent_client</property>
+        <documentation>Name of perforce client that will be retained between checkouts runs. Mandatory, and applies only when Incremental Sync option choosed.</documentation>
+    </formElement>
+	<formElement>
+        <type>checkbox</type>
+        <label>Incremental:</label>
+        <property>incremental</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <documentation>Choose whether you want to do incremental preflights or not</documentation>
+    </formElement>
+	<formElement>
+        <type>checkbox</type>
+        <label>Smart Sync:</label>
+        <property>smartSync</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <documentation>Choose whether you want to do smart sync preflights or not</documentation>
+    </formElement>
+	<formElement>
+        <type>checkbox</type>
+        <label>Delete untracked files:</label>
+        <property>deleteFiles</property>
+        <checkedValue>1</checkedValue>
+        <uncheckedValue>0</uncheckedValue>
+        <initiallyChecked>0</initiallyChecked>
+        <documentation>If checked will delete files in the client root used for smart sync that aren't present in the depot. This option only works with smart sync option.</documentation>
+    </formElement>
+</editor>
+
