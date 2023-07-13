@@ -6,7 +6,7 @@
     <integration>Perforce</integration>
     <description>SCM Plugin for Perforce</description>
     <author>CloudBees</author>
-    <authorUrl>http://www.electric-cloud.com/support</authorUrl>
+    <authorUrl>https://github.com/electric-cloud-community</authorUrl>
     <category>Source Code Management</category>
     <help>ECSCM-Perforce_help.xml</help>
     <depends min="1.1.0">ECSCM</depends>
